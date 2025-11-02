@@ -1,12 +1,15 @@
 document.getElementById("pick").addEventListener("click", async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const unsolvedOnly = document.getElementById("unsolvedOnly").checked;
+  
   chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    func: pickRandomProblem
+    func: pickRandomProblem,
+    args: [unsolvedOnly]
   });
 });
 
-function pickRandomProblem() {
+function pickRandomProblem(unsolvedOnly = false) {
   if (window.__leetcode_random_picker_active) return;
   window.__leetcode_random_picker_active = true;
 
@@ -57,6 +60,47 @@ function pickRandomProblem() {
 
   links = [...new Set(links)].filter(href => /^https:\/\/leetcode\.com\/problems\/[a-z0-9-]+\/$/i.test(href));
 
+  if (unsolvedOnly) {
+    const solvedProblems = new Set();
+    
+    const allSvgs = [...document.querySelectorAll('svg')];
+    
+    allSvgs.forEach(svg => {
+      const svgPath = svg.querySelector('path');
+      const pathD = svgPath ? svgPath.getAttribute('d') : '';
+      
+      if (pathD && (
+        pathD.includes('M9.688 15.898') ||
+        pathD.includes('9.605 9.605') ||
+        pathD.includes('M19.8 6l-8.4 8.4') ||
+        pathD.includes('19.8 6l-8.4 8.4')
+      )) {
+        let parent = svg;
+        for (let i = 0; i < 15; i++) {
+          parent = parent.parentElement;
+          if (!parent) break;
+          
+          const problemLink = parent.querySelector('a[href*="/problems/"]');
+          if (problemLink) {
+            let href = problemLink.href;
+            let clean = href.startsWith("http") ? href : `https://leetcode.com${href}`;
+            clean = clean.replace(/(https:\/\/leetcode\.com\/problems\/[a-z0-9-]+)\/?.*$/i, "$1/");
+            solvedProblems.add(clean);
+            break;
+          }
+        }
+      }
+    });
+    
+    links = links.filter(link => !solvedProblems.has(link));
+    
+    if (links.length === 0) {
+      showMessage("No unsolved problems found on this page!", "#e63946");
+      window.__leetcode_random_picker_active = false;
+      return;
+    }
+  }
+
   if (links.length === 0) {
     showMessage("No problems found on this page!", "#e63946");
     window.__leetcode_random_picker_active = false;
@@ -66,7 +110,6 @@ function pickRandomProblem() {
   const random = links[Math.floor(Math.random() * links.length)];
   showMessage("Opening random problem...", "#38b000");
 
-  // Open the new tab and notify background
   chrome.runtime.sendMessage({ action: "openProblemTab", url: random });
 
   setTimeout(() => (window.__leetcode_random_picker_active = false), 1000);
